@@ -28,7 +28,7 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 	signature_buffer.WriteString("<<\n")
 	signature_buffer.WriteString(" /Type /Sig\n")
 	signature_buffer.WriteString(" /Filter /Adobe.PPKLite\n")
-	signature_buffer.WriteString(" /SubFilter /adbe.pkcs7.detached\n")
+	signature_buffer.WriteString(" /SubFilter /ETSI.CAdES.detached\n")
 
 	signature_buffer.WriteString(context.createPropBuild())
 
@@ -166,17 +166,12 @@ func (context *SignContext) createSignaturePlaceholder() []byte {
 		signature_buffer.WriteString("\n")
 	}
 
-	// (Optional) The time of signing. Depending on the signature handler, this may
-	// be a normal unverified computer time or a time generated in a verifiable way
-	// from a secure time server.
-	//
-	// This value should be used only when the time of signing is not available in the
-	// signature. If SubFilter is ETSI.RFC3161, this entry should not be used and
-	// should be ignored by a PDF processor.
-	//
-	// A timestamp can be embedded in a CMS binary data object (see 12.8.3.3, "CMS
-	// (PKCS #7) signatures").
-	if context.SignData.TSA.URL == "" && !context.SignData.Signature.Info.Date.IsZero() {
+	// /M — signing time in the PDF signature dictionary.
+	// For PAdES-BASELINE-B (ETSI EN 319 142-1), the signing time MUST be in the
+	// PDF /M entry (not in CMS signing-time attribute, which has cardinality == 0).
+	// Always write /M when the date is set, regardless of TSA configuration.
+	// Exception: ETSI.RFC3161 SubFilter — /M should not be used per ISO 32000-2.
+	if !context.SignData.Signature.Info.Date.IsZero() {
 		signature_buffer.WriteString(" /M ")
 		signature_buffer.WriteString(pdfDateTime(context.SignData.Signature.Info.Date))
 		signature_buffer.WriteString("\n")
@@ -325,14 +320,23 @@ func (context *SignContext) createSignature() ([]byte, error) {
 		return nil, fmt.Errorf("new signed data: %w", err)
 	}
 
+	// Build extra signed attributes for CAdES-B-B compliance.
+	// The ESSCertIDv2 (signingCertificate) is always required.
+	// Adobe revocation data (OID 1.2.840.113583.1.1.8) is only included when
+	// non-empty — an empty attribute breaks CAdES parsers (e.g. EU DSS).
+	extraAttrs := []pkcs7.Attribute{*signingCertificate}
+	if context.SignData.RevocationData.CRL != nil || context.SignData.RevocationData.OCSP != nil {
+		extraAttrs = append([]pkcs7.Attribute{{
+			Type:  asn1.ObjectIdentifier{1, 2, 840, 113583, 1, 1, 8},
+			Value: context.SignData.RevocationData,
+		}}, extraAttrs...)
+	}
+
 	signer_config := pkcs7.SignerInfoConfig{
-		ExtraSignedAttributes: []pkcs7.Attribute{
-			{
-				Type:  asn1.ObjectIdentifier{1, 2, 840, 113583, 1, 1, 8},
-				Value: context.SignData.RevocationData,
-			},
-			*signingCertificate,
-		},
+		ExtraSignedAttributes: extraAttrs,
+		// PAdES-BASELINE-B (ETSI EN 319 142-1) requires signing-time cardinality == 0
+		// in CMS signed attributes. The signing date is conveyed via the PDF /M entry.
+		SkipSigningTime: true,
 	}
 
 	// Add the first certificate chain without our own certificate.

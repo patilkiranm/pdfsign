@@ -2,6 +2,11 @@ module github.com/digitorus/pdfsign
 
 go 1.25.0
 
+// Fork of pkcs7 with SkipSigningTime support for PAdES-BASELINE-B.
+// Update pseudo-version after pushing pkcs7 nordic branch:
+//   GOPROXY=direct go get github.com/patilkiranm/pkcs7@nordic && go mod tidy
+replace github.com/digitorus/pkcs7 => github.com/patilkiranm/pkcs7 v0.0.0-20260413075211-89201701bf6b
+
 require (
 	github.com/digitorus/pdf v0.1.2
 	github.com/digitorus/pkcs7 v0.0.0-20230818184609-3a137a874352
