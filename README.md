@@ -10,6 +10,8 @@ A PDF signing and verification library written in [Go](https://go.dev). This lib
 
 **See also our [PDFSigner](https://github.com/digitorus/pdfsigner/), a more advanced digital signature server that is using this project.**
 
+> **⚠️ Nordic fork.** This is `patilkiranm/pdfsign`, a fork of [`digitorus/pdfsign`](https://github.com/digitorus/pdfsign) maintained for the Nordic eSign platform. The default `nordic` branch carries patches for **PAdES-BASELINE-B (ETSI EN 319 142-1)** compliance plus a resilience hardening of the RFC 3161 TSA call (injectable, timeout-bounded, context-aware). The `main` branch tracks upstream unchanged. See **[FORK.md](FORK.md)** for the full list of changes and rationale.
+
 ## Quick Start
 
 ```bash
@@ -174,6 +176,25 @@ func main() {
     if err != nil {
         panic(err)
     }
+}
+```
+
+### Bounding the TSA request (Nordic fork)
+
+The RFC 3161 timestamp call runs over an injectable HTTP client and honors a
+caller-supplied `context.Context`, so a slow or hung Time-Stamp Authority cannot
+block the signing goroutine indefinitely. Both fields are optional additions of
+the `nordic` branch — when unset, the TSA call falls back to a default client
+with a 30-second timeout, preserving upstream behavior.
+
+```go
+signData := sign.SignData{
+    // ... Signature, Signer, Certificate, DigestAlgorithm as above ...
+    TSA: sign.TSA{
+        URL:        "https://freetsa.org/tsr",
+        HTTPClient: &http.Client{Timeout: 30 * time.Second}, // bound the TSA POST
+    },
+    Context: ctx, // cancel/deadline the TSA POST with the caller's context
 }
 ```
 
