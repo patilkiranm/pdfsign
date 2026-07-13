@@ -13,7 +13,7 @@ This fork depends on [patilkiranm/pkcs7](https://github.com/patilkiranm/pkcs7) (
 
 ## Changes
 
-All changes are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance.
+Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call.
 
 ### 1. SubFilter: ETSI.CAdES.detached (line 31)
 
@@ -39,8 +39,19 @@ All changes are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B 
 
 **Rationale:** PAdES-BASELINE-B requires CMS signing-time cardinality == 0. Depends on the pkcs7 fork.
 
+### 5. Bounded, injectable, context-aware TSA request (`GetTSA`)
+
+**Changed (`sign/types.go` + `sign/pdfsignature.go`):**
+- Added an optional `HTTPClient *http.Client` field to the `TSA` struct. `GetTSA` uses it, falling back to `&http.Client{Timeout: defaultTSATimeout}` (30s) when nil.
+- Added an optional `Context context.Context` field to `SignData`. `GetTSA` now builds the request with `http.NewRequestWithContext(SignData.Context, …)` (falling back to `context.Background()` when nil) instead of `http.NewRequest`.
+
+**Rationale:** The upstream `GetTSA` builds a bare `&http.Client{}` (no timeout) and a request with no context, so a TSA that accepts the TCP connection then stalls before responding blocks the signing goroutine indefinitely — the default transport bounds only the dial. In an async signing worker with a small fixed pool, a few stalled timestamp calls can saturate every slot and halt signing service-wide. There was also no way for the caller to supply a configured/pooled client.
+
+Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a pooled transport (the Nordic platform passes an `httpx`-managed client, consistent with its CSC/DSS/Signicat/Gotenberg clients); `SignData.Context` lets a caller deadline/cancellation (e.g. a job timeout) abort an in-flight POST. Both fields are optional and backward compatible — a nil client preserves prior behaviour except for the added 30s default ceiling, and a nil context preserves prior behaviour exactly.
+
 ## Upstream PR status
 
 - [ ] Configurable SubFilter — open issue to discuss API design (add `SubFilter` field to `SignData`)
 - [ ] Conditional revocation attribute — PR as bug fix
 - [ ] Always write `/M` — include in SubFilter discussion
+- [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)

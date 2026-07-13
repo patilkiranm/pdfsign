@@ -2,6 +2,7 @@ package sign
 
 import (
 	"bytes"
+	gocontext "context"
 	"crypto"
 	"crypto/x509"
 	"encoding/asn1"
@@ -12,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/digitorus/pkcs7"
 	"github.com/digitorus/timestamp"
@@ -20,6 +22,14 @@ import (
 )
 
 const signatureByteRangePlaceholder = "/ByteRange[0 ********** ********** **********]"
+
+// defaultTSATimeout bounds the RFC 3161 TSA round-trip when the caller injects
+// no TSA.HTTPClient. A bare http.Client has no timeout, so a TSA that accepts
+// the connection then stalls would block the signing goroutine forever; this is
+// the fallback ceiling. Callers that need a different timeout (or a pooled
+// transport) inject their own client via SignData.TSA.HTTPClient. The
+// SignData.Context deadline (if any) still applies and wins when shorter.
+const defaultTSATimeout = 30 * time.Second
 
 func (context *SignContext) createSignaturePlaceholder() []byte {
 	// Using a buffer because it's way faster than concatenating.
@@ -393,8 +403,13 @@ func (context *SignContext) GetTSA(sign_content []byte) (timestamp_response []by
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	reqCtx := context.SignData.Context
+	if reqCtx == nil {
+		reqCtx = gocontext.Background()
+	}
+
 	ts_request_reader := bytes.NewReader(ts_request)
-	req, err := http.NewRequest("POST", context.SignData.TSA.URL, ts_request_reader)
+	req, err := http.NewRequestWithContext(reqCtx, "POST", context.SignData.TSA.URL, ts_request_reader)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare request (%s): %w", context.SignData.TSA.URL, err)
 	}
@@ -406,7 +421,10 @@ func (context *SignContext) GetTSA(sign_content []byte) (timestamp_response []by
 		req.SetBasicAuth(context.SignData.TSA.Username, context.SignData.TSA.Password)
 	}
 
-	client := &http.Client{}
+	client := context.SignData.TSA.HTTPClient
+	if client == nil {
+		client = &http.Client{Timeout: defaultTSATimeout}
+	}
 	resp, err := client.Do(req)
 	code := 0
 

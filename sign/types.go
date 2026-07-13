@@ -1,9 +1,11 @@
 package sign
 
 import (
+	"context"
 	"crypto"
 	"crypto/x509"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/digitorus/pdf"
@@ -20,6 +22,12 @@ type TSA struct {
 	URL      string
 	Username string
 	Password string
+
+	// HTTPClient performs the RFC 3161 timestamp POST. When nil, GetTSA uses a
+	// default client with a 30s timeout. Inject a configured client to control
+	// the timeout and reuse a pooled transport (a bare, unbounded client lets a
+	// hung TSA block the signing goroutine indefinitely).
+	HTTPClient *http.Client
 }
 
 type RevocationFunction func(cert, issuer *x509.Certificate, i *revocation.InfoArchival) error
@@ -34,6 +42,12 @@ type SignData struct {
 	RevocationData     revocation.InfoArchival
 	RevocationFunction RevocationFunction
 	Appearance         Appearance
+
+	// Context bounds the outbound RFC 3161 TSA request in GetTSA. When nil it
+	// falls back to context.Background(). Set it to propagate a caller
+	// deadline/cancellation (e.g. a background-job timeout) into the timestamp
+	// POST so a hung TSA cannot block the signing goroutine indefinitely.
+	Context context.Context
 
 	objectId uint32
 }
