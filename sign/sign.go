@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"time"
 
 	_ "crypto/sha256"
 	_ "crypto/sha512"
 
 	"github.com/digitorus/pdf"
+	"github.com/digitorus/pdfsign/revocation"
 	"github.com/digitorus/pkcs7"
 
 	"github.com/mattetti/filebuffer"
@@ -117,8 +119,12 @@ func (context *SignContext) SignPDF() error {
 	const maxRetries = 5
 	succeeded := false
 
+	// RevocationFunction appends to SignData.RevocationData, so each attempt
+	// starts from the caller's data or the CRLs and OCSP responses duplicate.
+	revocationData := context.SignData.RevocationData
 	for retry := 0; retry < maxRetries; retry++ {
 		context.resetContext()
+		context.SignData.RevocationData = cloneRevocationData(revocationData)
 
 		// Copy old file into new buffer.
 		if err := context.copyInputToOutput(); err != nil {
@@ -285,6 +291,14 @@ func ensureContext(ctx stdcontext.Context) stdcontext.Context {
 		return stdcontext.Background()
 	}
 	return ctx
+}
+
+// cloneRevocationData copies the slices a RevocationFunction appends to, so an
+// attempt never writes into the caller's backing arrays.
+func cloneRevocationData(r revocation.InfoArchival) revocation.InfoArchival {
+	r.CRL = slices.Clone(r.CRL)
+	r.OCSP = slices.Clone(r.OCSP)
+	return r
 }
 
 func (context *SignContext) resetContext() {
