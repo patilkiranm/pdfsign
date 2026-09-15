@@ -1,5 +1,7 @@
 # Signing PDF files with Go
 
+> **Nordic fork.** This is `patilkiranm/pdfsign`, a fork of [`digitorus/pdfsign`](https://github.com/digitorus/pdfsign) maintained for the Nordic eSign platform. The default `nordic` branch carries three small patches on top of upstream: an injectable HTTP client for the RFC 3161 TSA request (`TSA.HTTPClient`), an xref stream that lists itself in its own `/Index`, and retry hygiene for the signature-too-long loop. The `main` branch tracks upstream unchanged. See **[FORK.md](FORK.md)** for the rationale.
+
 [![Build & Test](https://github.com/digitorus/pdfsign/workflows/Build%20&%20Test/badge.svg)](https://github.com/digitorus/pdfsign/actions?query=workflow%3Abuild-and-test)
 [![golangci-lint](https://github.com/digitorus/pdfsign/workflows/golangci-lint/badge.svg)](https://github.com/digitorus/pdfsign/actions?query=workflow%3Agolangci-lint)
 [![Go Report Card](https://goreportcard.com/badge/github.com/digitorus/pdfsign)](https://goreportcard.com/report/github.com/digitorus/pdfsign)
