@@ -13,7 +13,7 @@ This fork depends on [patilkiranm/pkcs7](https://github.com/patilkiranm/pkcs7) (
 
 ## Changes
 
-Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call.
+Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call. Change 6 (`sign/pdfxref_stream.go`) is a PDF structure bug fix.
 
 ### 1. SubFilter: ETSI.CAdES.detached (line 31)
 
@@ -49,9 +49,16 @@ Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-
 
 Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a pooled transport (the Nordic platform passes an `httpx`-managed client, consistent with its CSC/DSS/Signicat/Gotenberg clients); `SignData.Context` lets a caller deadline/cancellation (e.g. a job timeout) abort an in-flight POST. Both fields are optional and backward compatible — a nil client preserves prior behaviour except for the added 30s default ceiling, and a nil context preserves prior behaviour exactly.
 
+### 6. Xref stream `/Size` counts the xref stream itself
+
+**Changed (`sign/pdfxref_stream.go`):** `writeXrefStreamHeader` sets `/Size` to one more than the xref stream's own object number (never below the input's `/Size`), instead of `ItemCount + len(newXrefEntries) + 1`.
+
+**Rationale:** The xref stream is numbered by `addObject` after its header is written, so the old formula made `/Size` equal the xref stream's object number whenever the input's `/Size` was its highest object number plus one (pdfcpu output, and both xref-stream fixtures in `testfiles/`). ISO 32000 requires `/Size` to exceed every object number used in the section. A following incremental writer allocates from `/Size`: EU DSS (PDFBox) placed its `/DSS` dictionary at the xref stream's number, and readers that cache xref streams by object number (pypdf) then resolve `/DSS` to the xref stream and find no validation data. Signatures stayed valid; the defect was structural. Covered by `TestXrefStreamSizeCoversItself`; `TestWriteXrefTypeStream` previously pinned the undercount.
+
 ## Upstream PR status
 
 - [ ] Configurable SubFilter — open issue to discuss API design (add `SubFilter` field to `SignData`)
 - [ ] Conditional revocation attribute — PR as bug fix
 - [ ] Always write `/M` — include in SubFilter discussion
 - [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)
+- [ ] Xref stream `/Size` undercount — PR as bug fix (upstream main has the same formula)

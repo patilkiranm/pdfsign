@@ -87,8 +87,11 @@ func encodeXrefStream(data []byte, predictor int64) ([]byte, error) {
 func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLength int) error {
 	id := context.PDFReader.Trailer().Key("ID")
 
-	// Calculate total entries and create index array
-	totalEntries := uint32(context.PDFReader.XrefInformation.ItemCount)
+	// /Size must exceed every object number in this update, including the
+	// xref stream itself, which addObject numbers only after this header is
+	// written. A following incremental writer allocates from /Size, so an
+	// undercount makes it reuse this xref stream's object number.
+	size := max(uint32(context.PDFReader.XrefInformation.ItemCount), context.getNextObjectID()+1)
 	var indexArray []uint32
 
 	// Add existing entries section
@@ -101,7 +104,6 @@ func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLen
 	// Add new entries section
 	if len(context.newXrefEntries) > 0 {
 		indexArray = append(indexArray, context.lastXrefID+1, uint32(len(context.newXrefEntries)))
-		totalEntries += uint32(len(context.newXrefEntries))
 	}
 
 	buffer.WriteString("<< /Type /XRef\n")
@@ -110,7 +112,7 @@ func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLen
 	// Change W array to [1 4 1] to accommodate larger offsets
 	buffer.WriteString("  /W [ 1 4 1 ]\n")
 	fmt.Fprintf(buffer, "  /Prev %d\n", context.PDFReader.XrefInformation.StartPos)
-	fmt.Fprintf(buffer, "  /Size %d\n", totalEntries+1)
+	fmt.Fprintf(buffer, "  /Size %d\n", size)
 
 	// Write index array if we have entries
 	if len(indexArray) > 0 {

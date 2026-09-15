@@ -3,10 +3,15 @@ package sign
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/digitorus/pdf"
 	"github.com/mattetti/filebuffer"
@@ -227,5 +232,54 @@ func TestWriteXrefStream(t *testing.T) {
 		if !strings.Contains(output, elem) {
 			t.Errorf("Output missing required element: %s", elem)
 		}
+	}
+}
+
+// TestXrefStreamSizeCoversItself guards against an incremental update whose
+// /Size does not count the xref stream object it is written in. A following
+// writer allocates new objects from /Size, so an undercount makes it reuse the
+// xref stream's object number.
+func TestXrefStreamSizeCoversItself(t *testing.T) {
+	cert, pkey := loadCertificateAndKey(t)
+
+	for _, name := range []string{"testfile17.pdf", "testfile30.pdf"} {
+		t.Run(name, func(t *testing.T) {
+			input, err := os.ReadFile("../testfiles/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outPath := filepath.Join(t.TempDir(), name)
+			err = SignFile("../testfiles/"+name, outPath, SignData{
+				Signature: SignDataSignature{
+					Info:     SignDataSignatureInfo{Name: "Test", Date: time.Now()},
+					CertType: ApprovalSignature,
+				},
+				DigestAlgorithm: crypto.SHA256,
+				Signer:          pkey,
+				Certificate:     cert,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			update := string(output[len(input):])
+
+			var maxID int
+			for _, m := range regexp.MustCompile(`(?m)^(\d+) 0 obj`).FindAllStringSubmatch(update, -1) {
+				id, _ := strconv.Atoi(m[1])
+				maxID = max(maxID, id)
+			}
+			m := regexp.MustCompile(`/Type /XRef[^>]*?/Size (\d+)`).FindStringSubmatch(update)
+			if m == nil {
+				t.Fatal("no xref stream in the incremental update")
+			}
+			size, _ := strconv.Atoi(m[1])
+			if size <= maxID {
+				t.Errorf("/Size %d does not exceed highest object number %d in the update", size, maxID)
+			}
+		})
 	}
 }
