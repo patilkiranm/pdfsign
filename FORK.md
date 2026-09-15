@@ -61,7 +61,7 @@ Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a poole
 
 **Rationale:** The retry fires when the signature outgrows its estimated placeholder, and every retried output was unusable, for four independent reasons:
 - after the recursive call returned, the outer attempt continued and wrote the output a second time;
-- object numbering and xref entries accumulated from the abandoned attempt ([digitorus/pdfsign#135](https://github.com/digitorus/pdfsign/issues/135); the fix PR #136 was closed unmerged);
+- object numbering and xref entries accumulated from the abandoned attempt ([digitorus/pdfsign#135](https://github.com/digitorus/pdfsign/issues/135); PR #136 was closed unmerged, and upstream main since loops over attempts with a `resetContext` that clears the xref state and output buffer);
 - `RevocationFunction` appended its CRLs and OCSP responses again, duplicating them in the CMS;
 - growing by `diff + 1` left the zero-padded `/Contents` hex string with an odd digit count, which readers reject as malformed.
 
@@ -73,6 +73,8 @@ Each attempt still calls the signer and the TSA again; a retry costs a second ti
 
 **Rationale:** Each size group was written as consecutive cases with only the last one carrying the addition. Go cases do not fall through, so `SHA1-RSA`, `ECDSA-SHA1`, `SHA256-RSA`, `ECDSA-SHA256`, `SHA384-RSA` and `SHA512-RSA` reserved nothing for the signature value, and only `DSA-SHA1`, `DSA-SHA256`, `ECDSA-SHA384` and `ECDSA-SHA512` did. An underestimate forces the signature-too-long retry, which re-calls the signer and the TSA. Covered by `TestSignatureSizeEstimate`, which failed on six of its ten grouped names before the fix.
 
+**Upstream:** upstream main replaced this switch with an estimate from the signer's public key size (RSA modulus, ECDSA curve, ML-DSA), so this change drops on the next rebase onto upstream.
+
 **Boundary:** the switch keys on the certificate's own signature algorithm, the issuer's, not the signer's key, so the reserve is a heuristic rather than the signature size; `Ed25519` and the RSA-PSS algorithms still reserve nothing. The retry covers a shortfall.
 
 ## Upstream PR status
@@ -81,6 +83,6 @@ Each attempt still calls the signer and the TSA again; a retry costs a second ti
 - [ ] Conditional revocation attribute — PR as bug fix
 - [ ] Always write `/M` — include in SubFilter discussion
 - [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)
-- [ ] Xref stream missing from its own `/Index` and `/Size` — PR as bug fix (upstream main has the same code)
-- [ ] Clean-state retry — PR as bug fix, superseding the closed #136 (which reset xref state but kept the recursion and the odd-length growth)
-- [ ] Size-estimate switch cases that do not fall through — PR as bug fix (upstream main has the same switch)
+- [ ] Xref stream missing from its own `/Index` and `/Size` — PR as bug fix (still present on upstream main)
+- [ ] Clean-state retry — upstream main now loops with `resetContext`; still to offer upstream: the even placeholder growth (main still adds `+ 1`) and restoring `RevocationData` per attempt (main still appends to it)
+- [x] Size-estimate switch — nothing to upstream: upstream main replaced the switch with a public-key-size estimate
