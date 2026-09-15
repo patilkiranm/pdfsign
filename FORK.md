@@ -13,7 +13,7 @@ This fork depends on [patilkiranm/pkcs7](https://github.com/patilkiranm/pkcs7) (
 
 ## Changes
 
-Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call. Change 6 (`sign/pdfxref_stream.go`) is a PDF structure bug fix.
+Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call. Change 6 (`sign/pdfxref_stream.go`) is a PDF structure bug fix, and change 7 (`sign/sign.go` + `sign/pdfsignature.go`) fixes the signature-too-long retry.
 
 ### 1. SubFilter: ETSI.CAdES.detached (line 31)
 
@@ -55,6 +55,18 @@ Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a poole
 
 **Rationale:** The xref stream is numbered by `addObject` after its header is written, so the old formula made `/Size` equal the xref stream's object number whenever the input's `/Size` was its highest object number plus one (pdfcpu output, and both xref-stream fixtures in `testfiles/`). ISO 32000 requires `/Size` to exceed every object number used in the section. A following incremental writer allocates from `/Size`: EU DSS (PDFBox) placed its `/DSS` dictionary at the xref stream's number, and readers that cache xref streams by object number (pypdf) then resolve `/DSS` to the xref stream and find no validation data. Signatures stayed valid; the defect was structural. Covered by `TestXrefStreamSizeCoversItself`; `TestWriteXrefTypeStream` previously pinned the undercount.
 
+### 7. Signature-too-long retry starts from clean state
+
+**Changed (`sign/sign.go` + `sign/pdfsignature.go`):** `replaceSignature` no longer recurses into `SignPDF`; it returns `errSignatureTooLong`, and `SignPDF` loops over `signAttempt`, resetting `lastXrefID`, `newXrefEntries` and `updatedXrefEntries` and restoring the caller's `SignData.RevocationData` before each attempt. The placeholder grows by an even digit count.
+
+**Rationale:** The retry fires when the signature outgrows its estimated placeholder, and every retried output was unusable, for four independent reasons:
+- after the recursive call returned, the outer attempt continued and wrote the output a second time;
+- object numbering and xref entries accumulated from the abandoned attempt ([digitorus/pdfsign#135](https://github.com/digitorus/pdfsign/issues/135); the fix PR #136 was closed unmerged);
+- `RevocationFunction` appended its CRLs and OCSP responses again, duplicating them in the CMS;
+- growing by `diff + 1` left the zero-padded `/Contents` hex string with an odd digit count, which readers reject as malformed.
+
+Each attempt still calls the signer and the TSA again; a retry costs a second timestamp. Covered by `TestSignPDFRetryStartsClean`, which forces the retry from a two-digit placeholder on an xref-table and an xref-stream fixture; reverting any one part of the fix fails it.
+
 ## Upstream PR status
 
 - [ ] Configurable SubFilter — open issue to discuss API design (add `SubFilter` field to `SignData`)
@@ -62,3 +74,4 @@ Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a poole
 - [ ] Always write `/M` — include in SubFilter discussion
 - [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)
 - [ ] Xref stream `/Size` undercount — PR as bug fix (upstream main has the same formula)
+- [ ] Clean-state retry — PR as bug fix, superseding the closed #136 (which reset xref state but kept the recursion and the odd-length growth)

@@ -4,11 +4,14 @@ import (
 	"crypto"
 	"crypto/x509"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"slices"
 
 	"github.com/digitorus/pdf"
+	"github.com/digitorus/pdfsign/revocation"
 	"github.com/digitorus/pkcs7"
 
 	"github.com/mattetti/filebuffer"
@@ -71,7 +74,39 @@ func Sign(input io.ReadSeeker, output io.Writer, rdr *pdf.Reader, size int64, si
 	return nil
 }
 
+// errSignatureTooLong reports that the signature outgrew its placeholder;
+// replaceSignature has already enlarged SignatureMaxLengthBase for the retry.
+var errSignatureTooLong = errors.New("signature exceeds placeholder")
+
 func (context *SignContext) SignPDF() error {
+	// Each attempt rebuilds the output from the input, so it must start from the
+	// caller's revocation data and no object numbering: RevocationFunction
+	// appends, and addObject numbers from the entries already recorded. Retrying
+	// by recursion from replaceSignature would resume the abandoned attempt
+	// afterwards and write the output a second time.
+	revocationData := context.SignData.RevocationData
+	for {
+		context.SignData.RevocationData = cloneRevocationData(revocationData)
+		context.lastXrefID = 0
+		context.newXrefEntries = nil
+		context.updatedXrefEntries = nil
+
+		err := context.signAttempt()
+		if !errors.Is(err, errSignatureTooLong) {
+			return err
+		}
+	}
+}
+
+// cloneRevocationData copies the slices a RevocationFunction appends to, so an
+// attempt never writes into the caller's backing arrays.
+func cloneRevocationData(r revocation.InfoArchival) revocation.InfoArchival {
+	r.CRL = slices.Clone(r.CRL)
+	r.OCSP = slices.Clone(r.OCSP)
+	return r
+}
+
+func (context *SignContext) signAttempt() error {
 	// set defaults
 	if context.SignData.Signature.CertType == 0 {
 		context.SignData.Signature.CertType = 1

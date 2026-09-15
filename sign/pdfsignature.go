@@ -466,9 +466,10 @@ func (context *SignContext) replaceSignature() error {
 
 	if uint32(len(dst)) > context.SignatureMaxLength {
 		log.Println("Signature too long, retrying with increased buffer size.")
-		// set new base and try signing again
-		context.SignatureMaxLengthBase += (uint32(len(dst)) - context.SignatureMaxLength) + 1
-		return context.SignPDF()
+		// Grow by an even count: the placeholder is a hex string, and an odd
+		// digit count leaves /Contents unparseable once zero-padded.
+		context.SignatureMaxLengthBase += (uint32(len(dst)) - context.SignatureMaxLength) + 2
+		return errSignatureTooLong
 	}
 
 	if _, err := context.OutputBuffer.Seek(0, 0); err != nil {
