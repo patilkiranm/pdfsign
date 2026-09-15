@@ -146,22 +146,7 @@ func (context *SignContext) signAttempt() error {
 			return fmt.Errorf("certificate is required")
 		}
 
-		switch context.SignData.Certificate.SignatureAlgorithm.String() {
-		case "SHA1-RSA":
-		case "ECDSA-SHA1":
-		case "DSA-SHA1":
-			context.SignatureMaxLength += uint32(hex.EncodedLen(128))
-		case "SHA256-RSA":
-		case "ECDSA-SHA256":
-		case "DSA-SHA256":
-			context.SignatureMaxLength += uint32(hex.EncodedLen(256))
-		case "SHA384-RSA":
-		case "ECDSA-SHA384":
-			context.SignatureMaxLength += uint32(hex.EncodedLen(384))
-		case "SHA512-RSA":
-		case "ECDSA-SHA512":
-			context.SignatureMaxLength += uint32(hex.EncodedLen(512))
-		}
+		context.SignatureMaxLength += uint32(hex.EncodedLen(signatureSizeEstimate(context.SignData.Certificate.SignatureAlgorithm)))
 
 		// Add size of digest algorithm twice (for file digist and signing certificate attribute)
 		context.SignatureMaxLength += uint32(hex.EncodedLen(context.SignData.DigestAlgorithm.Size() * 2))
@@ -307,4 +292,22 @@ func (context *SignContext) signAttempt() error {
 	}
 
 	return nil
+}
+
+// signatureSizeEstimate returns the byte count reserved for the signature
+// value, by the certificate's signature algorithm; 0 when unrecognised. Names
+// sharing a size must share one case: Go cases do not fall through, and an
+// empty case adds nothing.
+func signatureSizeEstimate(alg x509.SignatureAlgorithm) int {
+	switch alg {
+	case x509.SHA1WithRSA, x509.ECDSAWithSHA1, x509.DSAWithSHA1:
+		return 128
+	case x509.SHA256WithRSA, x509.ECDSAWithSHA256, x509.DSAWithSHA256:
+		return 256
+	case x509.SHA384WithRSA, x509.ECDSAWithSHA384:
+		return 384
+	case x509.SHA512WithRSA, x509.ECDSAWithSHA512:
+		return 512
+	}
+	return 0
 }

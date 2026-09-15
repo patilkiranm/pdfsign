@@ -13,7 +13,7 @@ This fork depends on [patilkiranm/pkcs7](https://github.com/patilkiranm/pkcs7) (
 
 ## Changes
 
-Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call. Change 6 (`sign/pdfxref_stream.go`) is a PDF structure bug fix, and change 7 (`sign/sign.go` + `sign/pdfsignature.go`) fixes the signature-too-long retry.
+Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-B (ETSI EN 319 142-1) compliance. Change 5 (`sign/types.go` + `sign/pdfsignature.go`) is a resilience hardening of the TSA HTTP call. Change 6 (`sign/pdfxref_stream.go`) is a PDF structure bug fix, change 7 (`sign/sign.go` + `sign/pdfsignature.go`) fixes the signature-too-long retry, and change 8 (`sign/sign.go`) fixes the signature size estimate.
 
 ### 1. SubFilter: ETSI.CAdES.detached (line 31)
 
@@ -67,6 +67,14 @@ Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a poole
 
 Each attempt still calls the signer and the TSA again; a retry costs a second timestamp. Covered by `TestSignPDFRetryStartsClean`, which forces the retry from a two-digit placeholder on an xref-table and an xref-stream fixture; reverting any one part of the fix fails it.
 
+### 8. Signature size estimate covers every listed algorithm
+
+**Changed (`sign/sign.go`):** the placeholder estimate's switch moved into `signatureSizeEstimate`, with the names that share a size joined into one comma-separated case.
+
+**Rationale:** Each size group was written as consecutive cases with only the last one carrying the addition. Go cases do not fall through, so `SHA1-RSA`, `ECDSA-SHA1`, `SHA256-RSA`, `ECDSA-SHA256`, `SHA384-RSA` and `SHA512-RSA` reserved nothing for the signature value, and only `DSA-SHA1`, `DSA-SHA256`, `ECDSA-SHA384` and `ECDSA-SHA512` did. An underestimate forces the signature-too-long retry, which re-calls the signer and the TSA. Covered by `TestSignatureSizeEstimate`, which failed on six of its ten grouped names before the fix.
+
+**Boundary:** the switch keys on the certificate's own signature algorithm, the issuer's, not the signer's key, so the reserve is a heuristic rather than the signature size; `Ed25519` and the RSA-PSS algorithms still reserve nothing. The retry covers a shortfall.
+
 ## Upstream PR status
 
 - [ ] Configurable SubFilter — open issue to discuss API design (add `SubFilter` field to `SignData`)
@@ -75,3 +83,4 @@ Each attempt still calls the signer and the TSA again; a retry costs a second ti
 - [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)
 - [ ] Xref stream missing from its own `/Index` and `/Size` — PR as bug fix (upstream main has the same code)
 - [ ] Clean-state retry — PR as bug fix, superseding the closed #136 (which reset xref state but kept the recursion and the odd-length growth)
+- [ ] Size-estimate switch cases that do not fall through — PR as bug fix (upstream main has the same switch)

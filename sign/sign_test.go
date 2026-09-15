@@ -906,3 +906,27 @@ func newObjectsWritten(t *testing.T, update []byte, updated []xrefEntry) int {
 	}
 	return n
 }
+
+func TestSignatureSizeEstimate(t *testing.T) {
+	tests := []struct {
+		alg  x509.SignatureAlgorithm
+		want int
+	}{
+		{x509.SHA1WithRSA, 128},
+		{x509.ECDSAWithSHA1, 128},
+		{x509.DSAWithSHA1, 128},
+		{x509.SHA256WithRSA, 256},
+		{x509.ECDSAWithSHA256, 256},
+		{x509.DSAWithSHA256, 256},
+		{x509.SHA384WithRSA, 384},
+		{x509.ECDSAWithSHA384, 384},
+		{x509.SHA512WithRSA, 512},
+		{x509.ECDSAWithSHA512, 512},
+		{x509.PureEd25519, 0},
+	}
+	for _, tt := range tests {
+		if got := signatureSizeEstimate(tt.alg); got != tt.want {
+			t.Errorf("signatureSizeEstimate(%s) = %d, want %d", tt.alg, got, tt.want)
+		}
+	}
+}
