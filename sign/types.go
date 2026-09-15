@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"io"
+	"net/http"
 	"time"
 
 	"github.com/digitorus/pdf"
@@ -22,6 +23,11 @@ type TSA struct {
 	URL      string
 	Username string
 	Password string
+	// HTTPClient performs the RFC 3161 timestamp POST. When nil, GetTSA builds
+	// a bare client, bounded by defaultHTTPTimeout unless SignData.Context
+	// carries a deadline. Inject a configured client to reuse a pooled
+	// transport and own the timeout.
+	HTTPClient *http.Client
 }
 
 type RevocationFunction func(cert, issuer *x509.Certificate, i *revocation.InfoArchival) error

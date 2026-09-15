@@ -501,9 +501,12 @@ func (context *SignContext) GetTSA(sign_content []byte) (timestamp_response []by
 		req.SetBasicAuth(context.SignData.TSA.Username, context.SignData.TSA.Password)
 	}
 
-	client := &http.Client{}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		client.Timeout = defaultHTTPTimeout
+	client := context.SignData.TSA.HTTPClient
+	if client == nil {
+		client = &http.Client{}
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			client.Timeout = defaultHTTPTimeout
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
