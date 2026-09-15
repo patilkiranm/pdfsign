@@ -27,6 +27,17 @@ func (context *SignContext) writeXrefStream() error {
 		predictor = xrefStreamPredictor
 	}
 
+	// List the xref stream in its own section. PDFBox (EU DSS) numbers an
+	// incremental update's objects from the highest number in the parsed xref
+	// table and ignores /Size, so an unlisted xref stream's number is handed out
+	// again. Nothing is written to OutputBuffer before writeObject below, so the
+	// offset recorded here is where the object lands.
+	xrefID := context.getNextObjectID()
+	context.newXrefEntries = append(context.newXrefEntries, xrefEntry{
+		ID:     xrefID,
+		Offset: int64(context.OutputBuffer.Buff.Len()) + 1,
+	})
+
 	if err := writeXrefStreamEntries(&buffer, context); err != nil {
 		return fmt.Errorf("failed to write xref stream entries: %w", err)
 	}
@@ -46,8 +57,7 @@ func (context *SignContext) writeXrefStream() error {
 		return fmt.Errorf("failed to write xref stream content: %w", err)
 	}
 
-	_, err = context.addObject(xrefStreamObject.Bytes())
-	if err != nil {
+	if err := context.writeObject(xrefID, xrefStreamObject.Bytes()); err != nil {
 		return fmt.Errorf("failed to add xref stream object: %w", err)
 	}
 
@@ -87,11 +97,10 @@ func encodeXrefStream(data []byte, predictor int64) ([]byte, error) {
 func writeXrefStreamHeader(buffer *bytes.Buffer, context *SignContext, streamLength int) error {
 	id := context.PDFReader.Trailer().Key("ID")
 
-	// /Size must exceed every object number in this update, including the
-	// xref stream itself, which addObject numbers only after this header is
-	// written. A following incremental writer allocates from /Size, so an
-	// undercount makes it reuse this xref stream's object number.
-	size := max(uint32(context.PDFReader.XrefInformation.ItemCount), context.getNextObjectID()+1)
+	// newXrefEntries already ends with the xref stream itself (writeXrefStream),
+	// so /Size is one past it; a following writer that allocates from /Size
+	// would otherwise reuse the xref stream's number.
+	size := max(uint32(context.PDFReader.XrefInformation.ItemCount), context.lastXrefID+uint32(len(context.newXrefEntries))+1)
 	var indexArray []uint32
 
 	// Add existing entries section

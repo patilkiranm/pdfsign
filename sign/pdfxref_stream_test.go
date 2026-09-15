@@ -235,11 +235,11 @@ func TestWriteXrefStream(t *testing.T) {
 	}
 }
 
-// TestXrefStreamSizeCoversItself guards against an incremental update whose
-// /Size does not count the xref stream object it is written in. A following
-// writer allocates new objects from /Size, so an undercount makes it reuse the
-// xref stream's object number.
-func TestXrefStreamSizeCoversItself(t *testing.T) {
+// TestXrefStreamCoversItself guards the numbering a following incremental
+// writer derives from this update. PDFBox (EU DSS) numbers new objects from the
+// highest object number in the parsed xref table and ignores /Size, so the
+// xref stream must be listed in its own /Index; /Size must count it as well.
+func TestXrefStreamCoversItself(t *testing.T) {
 	cert, pkey := loadCertificateAndKey(t)
 
 	for _, name := range []string{"testfile17.pdf", "testfile30.pdf"} {
@@ -267,18 +267,27 @@ func TestXrefStreamSizeCoversItself(t *testing.T) {
 			}
 			update := string(output[len(input):])
 
-			var maxID int
-			for _, m := range regexp.MustCompile(`(?m)^(\d+) 0 obj`).FindAllStringSubmatch(update, -1) {
-				id, _ := strconv.Atoi(m[1])
-				maxID = max(maxID, id)
-			}
-			m := regexp.MustCompile(`/Type /XRef[^>]*?/Size (\d+)`).FindStringSubmatch(update)
+			m := regexp.MustCompile(`(?m)^(\d+) 0 obj\n<< /Type /XRef[^>]*?/Size (\d+)`).FindStringSubmatch(update)
 			if m == nil {
 				t.Fatal("no xref stream in the incremental update")
 			}
-			size, _ := strconv.Atoi(m[1])
-			if size <= maxID {
-				t.Errorf("/Size %d does not exceed highest object number %d in the update", size, maxID)
+			xrefID, _ := strconv.Atoi(m[1])
+			size, _ := strconv.Atoi(m[2])
+			if size != xrefID+1 {
+				t.Errorf("/Size %d, want %d (xref stream is object %d)", size, xrefID+1, xrefID)
+			}
+
+			r, err := pdf.NewReader(bytes.NewReader(output), int64(len(output)))
+			if err != nil {
+				t.Fatalf("signed output does not parse: %v", err)
+			}
+			var highest uint32
+			for _, e := range r.Xref() {
+				ptr := e.Ptr()
+				highest = max(highest, ptr.GetID())
+			}
+			if highest != uint32(xrefID) {
+				t.Errorf("highest object number in the xref table is %d, want the xref stream's %d", highest, xrefID)
 			}
 		})
 	}

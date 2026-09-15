@@ -49,11 +49,11 @@ Changes 1–4 are in `sign/pdfsignature.go` and are required for PAdES-BASELINE-
 
 Injecting `TSA.HTTPClient` lets the caller control the timeout and reuse a pooled transport (the Nordic platform passes an `httpx`-managed client, consistent with its CSC/DSS/Signicat/Gotenberg clients); `SignData.Context` lets a caller deadline/cancellation (e.g. a job timeout) abort an in-flight POST. Both fields are optional and backward compatible — a nil client preserves prior behaviour except for the added 30s default ceiling, and a nil context preserves prior behaviour exactly.
 
-### 6. Xref stream `/Size` counts the xref stream itself
+### 6. Xref stream lists itself in `/Index` and counts itself in `/Size`
 
-**Changed (`sign/pdfxref_stream.go`):** `writeXrefStreamHeader` sets `/Size` to one more than the xref stream's own object number (never below the input's `/Size`), instead of `ItemCount + len(newXrefEntries) + 1`.
+**Changed (`sign/pdfxref_stream.go`):** `writeXrefStream` records the xref stream's own entry before encoding, so the stream appears in its own `/Index` section, and `/Size` is one past it (never below the input's `/Size`). Previously the stream was numbered by `addObject` after its header was written: it was absent from `/Index`, and `/Size` equalled its object number whenever the input's `/Size` was its highest object number plus one (pdfcpu output, and both xref-stream fixtures in `testfiles/`).
 
-**Rationale:** The xref stream is numbered by `addObject` after its header is written, so the old formula made `/Size` equal the xref stream's object number whenever the input's `/Size` was its highest object number plus one (pdfcpu output, and both xref-stream fixtures in `testfiles/`). ISO 32000 requires `/Size` to exceed every object number used in the section. A following incremental writer allocates from `/Size`: EU DSS (PDFBox) placed its `/DSS` dictionary at the xref stream's number, and readers that cache xref streams by object number (pypdf) then resolve `/DSS` to the xref stream and find no validation data. Signatures stayed valid; the defect was structural. Covered by `TestXrefStreamSizeCoversItself`; `TestWriteXrefTypeStream` previously pinned the undercount.
+**Rationale:** PDFBox, which EU DSS uses to append the `/DSS` revision, numbers an incremental update's objects from the highest object number in the parsed xref table (`COSParser` sets `highestXRefObjectNumber`; `COSWriter` allocates from it) and ignores `/Size`. An xref stream is in that table only if its own `/Index` lists it, so PDFBox handed out the xref stream's number again, usually to the `/DSS` dictionary. The final xref resolved correctly and signatures stayed valid, but readers that cache xref streams by object number (pypdf) can resolve `/DSS` to the old xref stream. Correcting `/Size` alone did not change PDFBox's numbering; listing the stream does. Covered by `TestXrefStreamCoversItself`, which checks `/Size` and that the highest number in the signed output's xref table is the xref stream's own; `TestWriteXrefTypeStream` pins the new self-entry.
 
 ### 7. Signature-too-long retry starts from clean state
 
@@ -73,5 +73,5 @@ Each attempt still calls the signer and the TSA again; a retry costs a second ti
 - [ ] Conditional revocation attribute — PR as bug fix
 - [ ] Always write `/M` — include in SubFilter discussion
 - [ ] Bounded/context-aware TSA request — PR as bug fix (no-timeout bare client is a latency/liveness hazard)
-- [ ] Xref stream `/Size` undercount — PR as bug fix (upstream main has the same formula)
+- [ ] Xref stream missing from its own `/Index` and `/Size` — PR as bug fix (upstream main has the same code)
 - [ ] Clean-state retry — PR as bug fix, superseding the closed #136 (which reset xref state but kept the recursion and the odd-length growth)
