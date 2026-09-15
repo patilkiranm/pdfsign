@@ -303,7 +303,7 @@ func TestWriteXrefTypeStream(t *testing.T) {
 	}
 	payload := rest[:len(rest)-len(suffix)]
 
-	expectHeader := fmt.Sprintf("\n\n5 0 obj\n<< /Type /XRef\n  /Length %d\n  /Filter /FlateDecode\n  /W [ 1 4 1 ]\n  /Prev 0\n  /Size 3\n  /Index [ 3 2 ]\n  /Root 0 0 R\n>>\n", len(payload))
+	expectHeader := fmt.Sprintf("\n\n5 0 obj\n<< /Type /XRef\n  /Length %d\n  /Filter /FlateDecode\n  /W [ 1 4 1 ]\n  /Prev 0\n  /Size 6\n  /Index [ 3 3 ]\n  /Root 0 0 R\n>>\n", len(payload))
 	if string(header) != expectHeader {
 		t.Errorf("writeXref() dictionary = %q, want %q", header, expectHeader)
 	}
@@ -320,6 +320,7 @@ func TestWriteXrefTypeStream(t *testing.T) {
 	expectEntries := []byte{
 		1, 0, 0, 0, 100, 0,
 		1, 0, 0, 0, 200, 0,
+		1, 0, 0, 0, 2, 0, // the xref stream itself, at the object's own offset
 	}
 	if !bytes.Equal(entries, expectEntries) {
 		t.Errorf("decoded xref stream = %v, want %v", entries, expectEntries)

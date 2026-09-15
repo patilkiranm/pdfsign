@@ -3,12 +3,18 @@ package sign
 import (
 	"bytes"
 	"compress/zlib"
+	"crypto"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/digitorus/pdf"
+	"github.com/digitorus/pdfsign/internal/testpki"
 	"github.com/mattetti/filebuffer"
 )
 
@@ -227,5 +233,66 @@ func TestWriteXrefStream(t *testing.T) {
 		if !strings.Contains(output, elem) {
 			t.Errorf("Output missing required element: %s", elem)
 		}
+	}
+}
+
+// TestXrefStreamCoversItself guards the numbering a following incremental
+// writer derives from this update. PDFBox (EU DSS) numbers new objects from the
+// highest object number in the parsed xref table and ignores /Size, so the
+// xref stream must be listed in its own /Index; /Size must count it as well.
+func TestXrefStreamCoversItself(t *testing.T) {
+	pki := testpki.NewTestPKI(t)
+	pki.StartCRLServer()
+	defer pki.Close()
+	pkey, cert := pki.IssueLeaf("Test")
+
+	for _, name := range []string{"testfile17.pdf", "testfile_multi.pdf"} {
+		t.Run(name, func(t *testing.T) {
+			input, err := os.ReadFile("../testfiles/" + name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			outPath := filepath.Join(t.TempDir(), name)
+			err = SignFile("../testfiles/"+name, outPath, SignData{
+				Signature: SignDataSignature{
+					Info:     SignDataSignatureInfo{Name: "Test", Date: time.Now()},
+					CertType: ApprovalSignature,
+				},
+				DigestAlgorithm: crypto.SHA256,
+				Signer:          pkey,
+				Certificate:     cert,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			output, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			update := string(output[len(input):])
+
+			m := regexp.MustCompile(`(?m)^(\d+) 0 obj\n<< /Type /XRef[^>]*?/Size (\d+)`).FindStringSubmatch(update)
+			if m == nil {
+				t.Fatal("no xref stream in the incremental update")
+			}
+			xrefID, _ := strconv.Atoi(m[1])
+			size, _ := strconv.Atoi(m[2])
+			if size != xrefID+1 {
+				t.Errorf("/Size %d, want %d (xref stream is object %d)", size, xrefID+1, xrefID)
+			}
+
+			r, err := pdf.NewReader(bytes.NewReader(output), int64(len(output)))
+			if err != nil {
+				t.Fatalf("signed output does not parse: %v", err)
+			}
+			var highest uint32
+			for _, e := range r.Xref() {
+				ptr := e.Ptr()
+				highest = max(highest, ptr.GetID())
+			}
+			if highest != uint32(xrefID) {
+				t.Errorf("highest object number in the xref table is %d, want the xref stream's %d", highest, xrefID)
+			}
+		})
 	}
 }
